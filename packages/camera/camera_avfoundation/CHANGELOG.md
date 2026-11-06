@@ -4,7 +4,8 @@
   format of that shape (at least 1920 px wide when available) that still supports the largest
   photo of that shape, and `takePicture`
   requests those full photo dimensions. Keeps an image stream light while stills stay full
-  resolution (stock presets tie the still to the stream size). Falls back to stock below iOS 16.
+  resolution (stock presets tie the still to the stream size). Where that format can't be used
+  (below iOS 16, or none qualifies) `.medium` / `.low` behave like `.max` / `.ultraHigh`.
 
 ## 0.10.3+1
 

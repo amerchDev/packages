@@ -276,7 +276,15 @@ final class DefaultCamera: NSObject, Camera {
       audioCaptureSession.sessionPreset = videoCaptureSession.sessionPreset
       return
     }
-    switch resolutionPreset {
+    // DashEx fork: when the light-stream format can't be used (below iOS 16, or no such format),
+    // keep the quality these presets replaced (max / 4K) instead of stock 640x480 / 352x288.
+    var preset = resolutionPreset
+    if preset == .medium {
+      preset = .max
+    } else if preset == .low {
+      preset = .ultraHigh
+    }
+    switch preset {
     case .max:
       if let bestFormat = highestResolutionFormat(forCaptureDevice: captureDevice) {
         videoCaptureSession.sessionPreset = .inputPriority
