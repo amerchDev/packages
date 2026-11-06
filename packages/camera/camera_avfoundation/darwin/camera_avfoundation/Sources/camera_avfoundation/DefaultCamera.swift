@@ -342,8 +342,9 @@ final class DefaultCamera: NSObject, Camera {
   }
 
   /// DashEx fork (AI2-716): `.medium` means 4:3 and `.low` means 16:9. Picks the format of that shape
-  /// with the smallest video stream among those whose largest photo is as big as that shape allows,
-  /// so an image stream stays light while `takePicture` still returns a full-resolution still.
+  /// with the smallest video stream at least 1920 px wide among those whose largest photo is as big
+  /// as that shape allows, so an image stream stays light (and the preview sharp) while `takePicture`
+  /// still returns a full-resolution still.
   /// Stock presets tie the still to the stream size. Returns false (stock behavior) when it cannot.
   @available(iOS 16.0, *)
   private func applyLightStreamFullPhotoFormat(_ preset: PlatformResolutionPreset) throws -> Bool {
@@ -365,7 +366,15 @@ final class DefaultCamera: NSObject, Camera {
         && Int64(d.width) * den == Int64(d.height) * num
     }
     guard let bestPhoto = shaped.map(photoArea).max(), bestPhoto > 0 else { return false }
-    let full = shaped.filter { photoArea($0) == bestPhoto }
+    let fullPhoto = shaped.filter { photoArea($0) == bestPhoto }
+    // The smallest such stream (e.g. 640x480) makes a blurry preview; stay at least 1920 px wide
+    // (1920x1440 / 1920x1080, about a quarter of the 4032x3024 `max` stream) when the device has it.
+    let minLongSide: Int32 = 1920
+    let sharp = fullPhoto.filter { f in
+      let d = videoDimensionsConverter(f)
+      return max(d.width, d.height) >= minLongSide
+    }
+    let full = sharp.isEmpty ? fullPhoto : sharp
     // Smallest stream first; at equal size keep the current subtype (8-bit 420v/420f).
     guard
       let format = full.min(by: { a, b in

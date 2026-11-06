@@ -1,7 +1,8 @@
 ## 0.10.3+1 (DashEx fork, dashex/camera_avfoundation-0.10.3+1)
 
 * `ResolutionPreset.medium` (4:3) and `ResolutionPreset.low` (16:9) pick the smallest-stream device
-  format of that shape that still supports the largest photo of that shape, and `takePicture`
+  format of that shape (at least 1920 px wide when available) that still supports the largest
+  photo of that shape, and `takePicture`
   requests those full photo dimensions. Keeps an image stream light while stills stay full
   resolution (stock presets tie the still to the stream size). Falls back to stock below iOS 16.
 
