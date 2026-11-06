@@ -270,6 +270,12 @@ final class DefaultCamera: NSObject, Camera {
   private func setCaptureSessionPreset(
     _ resolutionPreset: PlatformResolutionPreset
   ) throws {
+    if #available(iOS 16.0, *), try applyLightStreamFullPhotoFormat(resolutionPreset) {
+      let size = videoDimensionsConverter(captureDevice.flutterActiveFormat)
+      previewSize = CGSize(width: CGFloat(size.width), height: CGFloat(size.height))
+      audioCaptureSession.sessionPreset = videoCaptureSession.sessionPreset
+      return
+    }
     switch resolutionPreset {
     case .max:
       if let bestFormat = highestResolutionFormat(forCaptureDevice: captureDevice) {
@@ -333,6 +339,47 @@ final class DefaultCamera: NSObject, Camera {
     let size = videoDimensionsConverter(captureDevice.flutterActiveFormat)
     previewSize = CGSize(width: CGFloat(size.width), height: CGFloat(size.height))
     audioCaptureSession.sessionPreset = videoCaptureSession.sessionPreset
+  }
+
+  /// DashEx fork (AI2-716): `.medium` means 4:3 and `.low` means 16:9. Picks the format of that shape
+  /// with the smallest video stream among those whose largest photo is as big as that shape allows,
+  /// so an image stream stays light while `takePicture` still returns a full-resolution still.
+  /// Stock presets tie the still to the stream size. Returns false (stock behavior) when it cannot.
+  @available(iOS 16.0, *)
+  private func applyLightStreamFullPhotoFormat(_ preset: PlatformResolutionPreset) throws -> Bool {
+    guard preset == .medium || preset == .low else { return false }
+    let (num, den): (Int64, Int64) = preset == .medium ? (4, 3) : (16, 9)
+    let btp2: FourCharCode = 1_651_798_066  // unsupported by the Flutter Engine, see below
+    let preferredSubType = CMFormatDescriptionGetMediaSubType(
+      captureDevice.flutterActiveFormat.formatDescription)
+    func videoArea(_ f: CaptureDeviceFormat) -> Int64 {
+      let d = videoDimensionsConverter(f)
+      return Int64(d.width) * Int64(d.height)
+    }
+    func photoArea(_ f: CaptureDeviceFormat) -> Int64 {
+      f.supportedMaxPhotoDimensions.map { Int64($0.width) * Int64($0.height) }.max() ?? 0
+    }
+    let shaped = captureDevice.flutterFormats.filter { f in
+      let d = videoDimensionsConverter(f)
+      return CMFormatDescriptionGetMediaSubType(f.formatDescription) != btp2
+        && Int64(d.width) * den == Int64(d.height) * num
+    }
+    guard let bestPhoto = shaped.map(photoArea).max(), bestPhoto > 0 else { return false }
+    let full = shaped.filter { photoArea($0) == bestPhoto }
+    // Smallest stream first; at equal size keep the current subtype (8-bit 420v/420f).
+    guard
+      let format = full.min(by: { a, b in
+        let (va, vb) = (videoArea(a), videoArea(b))
+        if va != vb { return va < vb }
+        return CMFormatDescriptionGetMediaSubType(a.formatDescription) == preferredSubType
+          && CMFormatDescriptionGetMediaSubType(b.formatDescription) != preferredSubType
+      })
+    else { return false }
+    videoCaptureSession.sessionPreset = .inputPriority
+    try captureDevice.lockForConfiguration()
+    captureDevice.flutterActiveFormat = format
+    captureDevice.unlockForConfiguration()
+    return true
   }
 
   /// Finds the highest available non-square resolution in terms of pixel count for the given device.
@@ -744,7 +791,8 @@ final class DefaultCamera: NSObject, Camera {
       }
     }
 
-    if mediaSettings.resolutionPreset == .max {
+    // DashEx fork: .medium / .low run a light stream with full-resolution stills (see above).
+    if [PlatformResolutionPreset.max, .medium, .low].contains(mediaSettings.resolutionPreset) {
       if #available(iOS 16.0, *) {
         settings.maxPhotoDimensions = capturePhotoOutput.maxPhotoDimensions
       } else {
